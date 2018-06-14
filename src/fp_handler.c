@@ -14,6 +14,7 @@
 #include <math.h>
 #include <jansson.h>
 #include <openssl/md5.h>
+#include <libgen.h>
 
 #include "slog.h"
 #include "db_ctx_handler.h"
@@ -22,7 +23,7 @@
 
 db_ctx_t* g_db_ctx;
 
-#define DEF_SEARCH_RANGE		0.001
+#define DEF_SEARCH_TOLERANCE		0.001
 
 #define DEF_DATABASE_NAME			":memory:"
 #define DEF_BACKUP_DATABASE			"audio_recongition.db"
@@ -82,34 +83,25 @@ bool fp_term(void)
 	return true;
 }
 
-bool fp_delete_fingerprint_info(const char* filename)
+bool fp_delete_fingerprint_info(const char* uuid)
 {
 	int ret;
 	json_t* j_tmp;
-	char* hash;
-	const char* uuid;
 	char* sql;
 
-	if(filename == NULL) {
+	if(uuid == NULL) {
 		slog(LOG_WARNING, "Wrong input parameter.");
 		return false;
 	}
 
-	hash = create_file_hash(filename);
-	if(hash == NULL) {
-		slog(LOG_ERR, "Could not create hash info.");
-		return false;
-	}
-
 	// get audio list info
-	j_tmp = get_audio_list_info_by_hash(hash);
+	j_tmp = get_audio_list_info(uuid);
 	if(j_tmp == NULL) {
 		slog(LOG_NOTICE, "Could not find audio list info.");
 		return false;
 	}
 
-	uuid = json_string_value(json_object_get(j_tmp, "uuid"));
-
+	// delete audio list info
 	asprintf(&sql, "delete from audio_list where uuid='%s';", uuid);
 	ret = db_ctx_exec(g_db_ctx, sql);
 	sfree(sql);
@@ -119,6 +111,7 @@ bool fp_delete_fingerprint_info(const char* filename)
 		return false;
 	}
 
+	// delete audio fingerprint info
 	asprintf(&sql, "delete from audio_fingerprint where uuid='%s';", uuid);
 	ret = db_ctx_exec(g_db_ctx, sql);
 	sfree(sql);
@@ -224,8 +217,8 @@ json_t* fp_search_fingerprint_info(const char* filename, const int coefs)
 		asprintf(&sql, "insert into %s select * from audio_fingerprint where "
 				"max1 >= %f and max1 <= %f",
 				tablename,
-				json_real_value(json_object_get(j_tmp, "max1")) - DEF_SEARCH_RANGE,
-				json_real_value(json_object_get(j_tmp, "max1")) + DEF_SEARCH_RANGE
+				json_real_value(json_object_get(j_tmp, "max1")) - DEF_SEARCH_TOLERANCE,
+				json_real_value(json_object_get(j_tmp, "max1")) + DEF_SEARCH_TOLERANCE
 				);
 
 		// add more conditions if the more coefs has given.
@@ -236,10 +229,10 @@ json_t* fp_search_fingerprint_info(const char* filename, const int coefs)
 					sql,
 
 					tmp_max,
-					json_real_value(json_object_get(j_tmp, tmp_max)) - DEF_SEARCH_RANGE,
+					json_real_value(json_object_get(j_tmp, tmp_max)) - DEF_SEARCH_TOLERANCE,
 
 					tmp_max,
-					json_real_value(json_object_get(j_tmp, tmp_max)) + DEF_SEARCH_RANGE
+					json_real_value(json_object_get(j_tmp, tmp_max)) + DEF_SEARCH_TOLERANCE
 					);
 			sfree(tmp_max);
 			sfree(sql);
@@ -295,6 +288,35 @@ json_t* fp_search_fingerprint_info(const char* filename, const int coefs)
 }
 
 /**
+ * Returns all list of fingerprinted info.
+ * @return
+ */
+json_t* fp_get_fingerprint_lists_all(void)
+{
+	char* sql;
+	json_t* j_res;
+	json_t* j_tmp;
+
+	// get result
+	asprintf(&sql, "select * from audio_list;");
+	db_ctx_query(g_db_ctx, sql);
+	sfree(sql);
+
+	j_res = json_array();
+	while(1) {
+		j_tmp = db_ctx_get_record(g_db_ctx);
+		if(j_tmp == NULL) {
+			break;
+		}
+
+		json_array_append_new(j_res, j_tmp);
+	}
+	db_ctx_free(g_db_ctx);
+
+	return j_res;
+}
+
+/**
  * Create audio list data and insert it.
  * If the file is already listed, return false.
  * @param filename
@@ -305,6 +327,8 @@ static bool create_audio_list_info(const char* filename, const char* uuid)
 {
 	int ret;
 	char* hash;
+	char* tmp;
+	const char* name;
 	json_t* j_tmp;
 
 	if((filename == NULL) || (uuid == NULL)) {
@@ -330,9 +354,12 @@ static bool create_audio_list_info(const char* filename, const char* uuid)
 	}
 
 	// craete data
+	tmp = strdup(filename);
+	name = basename(tmp);
+	sfree(tmp);
 	j_tmp = json_pack("{s:s, s:s, s:s}",
 			"uuid", 	uuid,
-			"name",		filename,
+			"name",		name,
 			"hash",		hash
 			);
 	sfree(hash);

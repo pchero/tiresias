@@ -1,4 +1,4 @@
-TARGET = audio_fingerprint
+TARGET = tiresias
 LIBS = -lm -laubio -lsqlite3 -ljansson -lssl -lcrypto -luuid
 CC = gcc
 CFLAGS = -g -Wall

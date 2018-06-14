@@ -11,6 +11,7 @@
 bool fp_init(void);
 bool fp_term(void);
 
+json_t* fp_get_fingerprint_lists_all(void);
 bool fp_delete_fingerprint_info(const char* filename);
 bool fp_craete_fingerprint_info(const char* filename);
 json_t* fp_search_fingerprint_info(const char* filename, const int coefs);
